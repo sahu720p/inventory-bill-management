@@ -216,6 +216,16 @@ export default function PurchaseHistoryView({
     }
   };
 
+  // Helper for computing bill total if corrupted/zero
+  const getBillTotal = (bill) => {
+    if (typeof bill.totalAmount === 'number' && bill.totalAmount > 0) return bill.totalAmount;
+    const matchingItems = purchaseItems.filter(i => i.billId === bill.billId);
+    if (matchingItems.length > 0) {
+      return matchingItems.reduce((s, it) => s + ((parseFloat(it.wholesaleRate) || 0) * (parseFloat(it.quantity) || 1)), 0);
+    }
+    return 0;
+  };
+
   // Total wholesale value of items
   const totalWholesaleValue = filteredItems.reduce((sum, it) => sum + ((it.wholesaleRate || 0) * (it.quantity || 1)), 0);
 
@@ -439,7 +449,7 @@ export default function PurchaseHistoryView({
                       </span>
                     </td>
                     <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--gold-600)' }}>
-                      {formatCurrency(bill.totalAmount)}
+                      {formatCurrency(getBillTotal(bill))}
                     </td>
                     <td style={{ textAlign: 'center' }}>
                       {bill.imageUrl ? (
@@ -551,7 +561,11 @@ export default function PurchaseHistoryView({
 
             <div className="modal-footer" style={{ justifyContent: 'space-between' }}>
               <div style={{ fontWeight: 700 }}>
-                Total Bill Value: {formatCurrency(billItemsModal.bill.totalAmount)}
+                Total Bill Value: {formatCurrency(
+                  (typeof billItemsModal.bill.totalAmount === 'number' && billItemsModal.bill.totalAmount > 0)
+                    ? billItemsModal.bill.totalAmount
+                    : billItemsModal.items.reduce((s, it) => s + ((parseFloat(it.wholesaleRate) || 0) * (parseFloat(it.quantity) || 1)), 0)
+                )}
               </div>
               <button onClick={() => setBillItemsModal(null)} className="btn btn-secondary">
                 Close

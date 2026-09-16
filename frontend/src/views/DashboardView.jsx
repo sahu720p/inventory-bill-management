@@ -17,6 +17,7 @@ import {
 import { productApi, purchaseApi, invoiceApi } from '../services/api';
 import { db } from '../db/db';
 import { formatCurrency } from '../services/pricingService';
+import { getInvoiceItems } from '../services/invoiceService';
 
 export default function DashboardView({
   setActiveTab,
@@ -72,10 +73,20 @@ export default function DashboardView({
 
       const totalPurchases = bills.length;
       const totalInvoices = invoices.length;
-      const totalSalesAmount = invoices.filter(i => i.status !== 'Cancelled').reduce((sum, inv) => sum + (inv.grandTotal || 0), 0);
+      const calculateInvoiceTotal = (inv) => {
+        if (typeof inv.grandTotal === 'number' && inv.grandTotal > 0) return inv.grandTotal;
+        if (Array.isArray(inv.items) && inv.items.length > 0) {
+          return inv.items.reduce((s, it) => s + ((it.quantity || 1) * (it.unitPrice || it.rate || 0)), 0);
+        }
+        return 0;
+      };
+
+      const totalSalesAmount = invoices
+        .filter(i => i.status !== 'Cancelled')
+        .reduce((sum, inv) => sum + calculateInvoiceTotal(inv), 0);
       const todaySalesAmount = invoices
         .filter(inv => inv.date === today && inv.status !== 'Cancelled')
-        .reduce((sum, inv) => sum + (inv.grandTotal || 0), 0);
+        .reduce((sum, inv) => sum + calculateInvoiceTotal(inv), 0);
 
       const sortedInvoices = [...invoices].sort((a, b) => new Date(b.createdAt || b.date) - new Date(a.createdAt || a.date)).slice(0, 5);
 
@@ -289,12 +300,18 @@ export default function DashboardView({
                       {inv.date}
                     </td>
                     <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--gold-600)' }}>
-                      {formatCurrency(inv.grandTotal)}
+                      {formatCurrency(
+                        (typeof inv.grandTotal === 'number' && inv.grandTotal > 0)
+                          ? inv.grandTotal
+                          : (Array.isArray(inv.items) && inv.items.length > 0
+                              ? inv.items.reduce((s, it) => s + ((it.quantity || 1) * (it.unitPrice || it.rate || 0)), 0)
+                              : 0)
+                      )}
                     </td>
                     <td style={{ textAlign: 'center' }}>
                       <button
                         onClick={async () => {
-                          const items = await db.invoiceItems.where('invoiceId').equals(inv.id).toArray();
+                          const items = await getInvoiceItems(inv);
                           onViewInvoice(inv, items);
                         }}
                         className="btn btn-secondary btn-sm"

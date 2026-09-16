@@ -3,6 +3,7 @@ import { settingsApi } from './services/api';
 import { initDatabase, db } from './db/db';
 import { clearAllStoreData } from './db/seedData';
 import { getCurrentUser, logout } from './services/authService';
+import { repairAllInvoices, getInvoiceItems } from './services/invoiceService';
 
 import Sidebar from './components/common/Sidebar';
 import Header from './components/common/Header';
@@ -81,6 +82,11 @@ export default function App() {
           });
         } catch (e) {}
       }
+
+      // 2. Background Auto-Repair for old 0-amount invoices
+      try {
+        repairAllInvoices();
+      } catch (e) {}
     }
     bootstrap();
   }, []);
@@ -152,11 +158,7 @@ export default function App() {
     // Ensure invoice items are always loaded
     let invoiceItemsList = items;
     if (!invoiceItemsList || invoiceItemsList.length === 0) {
-      if (invoice?.items && invoice.items.length > 0) {
-        invoiceItemsList = invoice.items;
-      } else if (invoice?.id) {
-        invoiceItemsList = await db.invoiceItems.where('invoiceId').equals(invoice.id).toArray();
-      }
+      invoiceItemsList = await getInvoiceItems(invoice);
     }
 
     setActivePrintInvoice(invoice);

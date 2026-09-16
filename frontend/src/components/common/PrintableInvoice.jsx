@@ -25,12 +25,27 @@ export default function PrintableInvoice({
   useEffect(() => {
     async function loadItems() {
       if (!initialItems || initialItems.length === 0) {
-        if (invoice?.items && invoice.items.length > 0) {
+        if (invoice?.items && Array.isArray(invoice.items) && invoice.items.length > 0) {
           setLineItems(invoice.items);
-        } else if (invoice?.id) {
+        } else {
           try {
-            const dbItems = await db.invoiceItems.where('invoiceId').equals(invoice.id).toArray();
-            setLineItems(dbItems || []);
+            const candidateIds = [
+              invoice?.id,
+              invoice?._id,
+              invoice?.invoiceNumber,
+              String(invoice?.id),
+              Number(invoice?.id)
+            ].filter(Boolean);
+
+            let found = [];
+            for (const cid of candidateIds) {
+              const res = await db.invoiceItems.where('invoiceId').equals(cid).toArray();
+              if (res && res.length > 0) {
+                found = res;
+                break;
+              }
+            }
+            setLineItems(found);
           } catch (e) {
             console.error('Failed to load invoice items in modal:', e);
           }
@@ -43,6 +58,19 @@ export default function PrintableInvoice({
   }, [invoice, initialItems]);
 
   if (!invoice) return null;
+
+  // Calculate bulletproof totals with fallback
+  const itemsTotal = lineItems.reduce((sum, item) => {
+    const qty = Number(item.quantity ?? item.qty ?? 1) || 1;
+    const rate = Number(item.rate ?? item.sellingPrice ?? item.price ?? item.wholesaleRate ?? 0) || 0;
+    return sum + (Number(item.amount ?? item.total ?? (qty * rate)) || 0);
+  }, 0);
+
+  const displayGrandTotal = (Number(invoice.grandTotal) > 0)
+    ? Number(invoice.grandTotal)
+    : (Number(invoice.subtotal) > 0
+        ? Number(invoice.subtotal)
+        : itemsTotal);
 
   // Handle direct print
   const handlePrint = () => {
@@ -344,7 +372,7 @@ export default function PrintableInvoice({
               <tbody>
                 {lineItems.map((item, index) => {
                   const qty = Number(item.quantity ?? item.qty ?? 1) || 1;
-                  const rate = Number(item.rate ?? item.sellingPrice ?? item.price ?? 0) || 0;
+                  const rate = Number(item.rate ?? item.sellingPrice ?? item.price ?? item.wholesaleRate ?? 0) || 0;
                   const lineTotal = Number(item.amount ?? item.total ?? (qty * rate)) || 0;
                   const name = item.productName || item.name || 'Product';
 
@@ -387,7 +415,7 @@ export default function PrintableInvoice({
                   }}
                 >
                   <span>Grand Total:</span>
-                  <span style={{ color: 'var(--gold-600)' }}>{formatCurrency(invoice.grandTotal)}</span>
+                  <span style={{ color: 'var(--gold-600)' }}>{formatCurrency(displayGrandTotal)}</span>
                 </div>
               </div>
             </div>

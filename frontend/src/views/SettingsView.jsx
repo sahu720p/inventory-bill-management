@@ -16,13 +16,15 @@ import {
   Phone,
   Trash2,
   Server,
-  ArrowRight
+  ArrowRight,
+  Receipt
 } from 'lucide-react';
 import { db } from '../db/db';
 import { settingsApi, migrationApi } from '../services/api';
 import { migrateDexieToMongoDB } from '../services/migrationService';
 import { changeAdminPassword } from '../services/authService';
 import { seedDemoData, clearAllStoreData } from '../db/seedData';
+import { resetInvoiceSequence, repairAllInvoices, getNextInvoiceNumber } from '../services/invoiceService';
 import ConfirmModal from '../components/common/ConfirmModal';
 
 export default function SettingsView({
@@ -55,6 +57,11 @@ export default function SettingsView({
   const [isResetConfirmOpen, setIsResetConfirmOpen] = useState(false);
   const [isClearAllConfirmOpen, setIsClearAllConfirmOpen] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+
+  // Invoice Sequence & Repair States
+  const [invoiceSeqInput, setInvoiceSeqInput] = useState('0');
+  const [nextInvoicePreview, setNextInvoicePreview] = useState('');
+  const [isRepairing, setIsRepairing] = useState(false);
 
   useEffect(() => {
     loadSettings();
@@ -93,6 +100,7 @@ export default function SettingsView({
   const loadSettings = async () => {
     try {
       // 1. Try MongoDB API
+      let loaded = false;
       try {
         const res = await settingsApi.getAll();
         if (res.success && res.map) {
@@ -100,23 +108,64 @@ export default function SettingsView({
             ...prev,
             ...res.map
           }));
-          return;
+          loaded = true;
         }
       } catch (apiErr) {
         console.warn('API error fetching settings, using local:', apiErr.message);
       }
 
       // 2. Fallback to local Dexie
-      const allSettings = await db.settings.toArray();
-      const settingsMap = {};
-      allSettings.forEach(s => { settingsMap[s.key] = s.value; });
+      if (!loaded) {
+        const allSettings = await db.settings.toArray();
+        const settingsMap = {};
+        allSettings.forEach(s => { settingsMap[s.key] = s.value; });
 
-      setShopSettings(prev => ({
-        ...prev,
-        ...settingsMap
-      }));
+        setShopSettings(prev => ({
+          ...prev,
+          ...settingsMap
+        }));
+      }
+
+      // Load invoice sequence info
+      try {
+        const nextInfo = await getNextInvoiceNumber();
+        setNextInvoicePreview(nextInfo.formattedNumber);
+        const counterRec = await db.counters.get('invoice_sequence');
+        if (counterRec) setInvoiceSeqInput(String(counterRec.value || 0));
+      } catch (e) {}
     } catch (err) {
       console.error('Failed to load settings:', err);
+    }
+  };
+
+  // Save / Reset Invoice Sequence Counter
+  const handleSaveSequence = async (e) => {
+    if (e) e.preventDefault();
+    try {
+      const val = Math.max(0, parseInt(invoiceSeqInput, 10) || 0);
+      const res = await resetInvoiceSequence(val);
+      setNextInvoicePreview(res.formattedNumber);
+      if (onShowToast) {
+        onShowToast(`Invoice sequence counter updated! Next bill: ${res.formattedNumber}`, 'success');
+      }
+    } catch (err) {
+      alert('Error updating counter: ' + err.message);
+    }
+  };
+
+  // Run Auto-Repair for All Invoices
+  const handleAutoRepairInvoices = async () => {
+    setIsRepairing(true);
+    try {
+      const result = await repairAllInvoices();
+      if (onShowToast) {
+        onShowToast(`All invoices verified & healed! Local: ${result.localRepaired}, MongoDB: ${result.backendRepaired}`, 'success');
+      }
+      await loadSettings();
+    } catch (err) {
+      alert('Repair failed: ' + err.message);
+    } finally {
+      setIsRepairing(false);
     }
   };
 
@@ -391,16 +440,6 @@ export default function SettingsView({
             <RefreshCw size={14} />
             <span>Check Status</span>
           </button>
-
-          <button
-            onClick={handleMigrateToMongoDB}
-            disabled={isMigrating}
-            className="btn btn-primary btn-sm"
-            style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}
-          >
-            <ArrowRight size={14} />
-            <span>{isMigrating ? 'Migrating Data...' : 'Sync Local ➔ MongoDB'}</span>
-          </button>
         </div>
       </div>
 
@@ -519,6 +558,76 @@ export default function SettingsView({
 
         {/* Right Column: Security & Database Management */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+          {/* Invoice Numbering & Sequence Management Card */}
+          <div className="card">
+            <h2 style={{ fontSize: '1.2rem', fontWeight: 700, marginBottom: '1.25rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <Receipt size={20} style={{ color: 'var(--gold-500)' }} />
+              <span>Invoice Sequence & Numbering Controls</span>
+            </h2>
+
+            <form onSubmit={handleSaveSequence} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+              <div style={{ background: '#FAF8F5', padding: '0.85rem 1rem', borderRadius: 'var(--radius-md)', border: '1px solid #EBE5DC' }}>
+                <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', textTransform: 'uppercase', fontWeight: 600 }}>
+                  Next Sequential Invoice
+                </div>
+                <div style={{ fontSize: '1.25rem', fontWeight: 800, color: 'var(--gold-600)', marginTop: '0.2rem' }}>
+                  {nextInvoicePreview || 'Loading...'}
+                </div>
+              </div>
+
+              <div className="form-group" style={{ margin: 0 }}>
+                <label className="form-label" style={{ fontSize: '0.82rem' }}>
+                  Current Counter Value (Set 0 to start fresh from 1)
+                </label>
+                <div style={{ display: 'flex', gap: '0.5rem' }}>
+                  <input
+                    type="number"
+                    min="0"
+                    required
+                    value={invoiceSeqInput}
+                    onChange={(e) => setInvoiceSeqInput(e.target.value)}
+                    className="form-input"
+                    style={{ fontWeight: 800, fontSize: '1.05rem', textAlign: 'center' }}
+                  />
+                  <button
+                    type="submit"
+                    className="btn btn-primary btn-sm"
+                    style={{ whiteSpace: 'nowrap' }}
+                  >
+                    <Save size={14} />
+                    <span>Set Counter</span>
+                  </button>
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', borderTop: '1px solid var(--border-light)', paddingTop: '0.85rem' }}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setInvoiceSeqInput('0');
+                    resetInvoiceSequence(0).then(res => setNextInvoicePreview(res.formattedNumber));
+                    if (onShowToast) onShowToast('Invoice sequence counter reset to 0 (Next: 0001)', 'success');
+                  }}
+                  className="btn btn-secondary btn-sm"
+                >
+                  <RefreshCw size={13} />
+                  <span>Reset Counter to 0</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleAutoRepairInvoices}
+                  disabled={isRepairing}
+                  className="btn btn-dark btn-sm"
+                  title="Auto-repair all past invoices with 0 amounts"
+                >
+                  <Sparkles size={13} style={{ color: 'var(--gold-400)' }} />
+                  <span>{isRepairing ? 'Repairing...' : 'Auto-Fix 0 Amount Bills'}</span>
+                </button>
+              </div>
+            </form>
+          </div>
+
           {/* Admin Password Change */}
           <div className="card">
             <h2 style={{ fontSize: '1.2rem', fontWeight: 700, marginBottom: '1.25rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>

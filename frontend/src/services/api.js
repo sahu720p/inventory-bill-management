@@ -93,6 +93,17 @@ export const invoiceApi = {
     method: 'POST',
     body: JSON.stringify(invoiceData)
   }),
+  update: (id, invoiceData) => request(`/invoices/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(invoiceData)
+  }),
+  resetCounter: (sequenceValue = 0) => request('/invoices/reset-counter', {
+    method: 'POST',
+    body: JSON.stringify({ sequenceValue })
+  }),
+  repairInvoices: () => request('/invoices/repair', {
+    method: 'POST'
+  }),
   cancel: (id) => request(`/invoices/${id}/cancel`, {
     method: 'POST'
   }),

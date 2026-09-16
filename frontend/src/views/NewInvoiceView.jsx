@@ -15,11 +15,14 @@ import {
   Tag,
   Layers,
   CreditCard,
-  Shirt
+  Shirt,
+  RotateCcw,
+  Edit3,
+  RefreshCw
 } from 'lucide-react';
 import { db } from '../db/db';
 import { productApi } from '../services/api';
-import { getNextInvoiceNumber, createInvoice } from '../services/invoiceService';
+import { getNextInvoiceNumber, createInvoice, resetInvoiceSequence } from '../services/invoiceService';
 import { formatCurrency } from '../services/pricingService';
 import confetti from 'canvas-confetti';
 
@@ -47,6 +50,9 @@ export default function NewInvoiceView({
   onShowToast
 }) {
   const [nextInvoiceNum, setNextInvoiceNum] = useState('INV-00001');
+  const [isManualInvoiceNum, setIsManualInvoiceNum] = useState(false);
+  const [customInvoiceNum, setCustomInvoiceNum] = useState('');
+
   const [customerName, setCustomerName] = useState('');
   const [customerMobile, setCustomerMobile] = useState('');
   const [customerAddress, setCustomerAddress] = useState('');
@@ -197,6 +203,26 @@ export default function NewInvoiceView({
   // Grand Total Calculation (No GST applied to retail total)
   const grandTotal = Number(invoiceItems.reduce((sum, it) => sum + (it.rate * it.quantity), 0).toFixed(2));
 
+  // Reset entire current bill form
+  const handleResetBillForm = () => {
+    setCustomerName('');
+    setCustomerMobile('');
+    setCustomerAddress('');
+    setInvoiceItems([]);
+    setProductForm({
+      productType: 'Saree',
+      productName: '',
+      quantity: 1,
+      rate: '',
+      productId: null
+    });
+    if (isManualInvoiceNum) {
+      setCustomInvoiceNum('');
+    }
+    loadInvoiceData();
+    if (onShowToast) onShowToast('New invoice bill form reset successfully.', 'info');
+  };
+
   // Submit & Generate Invoice
   const handleGenerateInvoice = async (e) => {
     if (e) e.preventDefault();
@@ -206,6 +232,8 @@ export default function NewInvoiceView({
       return;
     }
 
+    const manualNumber = isManualInvoiceNum && customInvoiceNum.trim() ? customInvoiceNum.trim() : '';
+
     setIsSubmitting(true);
     try {
       const result = await createInvoice({
@@ -213,7 +241,8 @@ export default function NewInvoiceView({
         customerMobile: customerMobile.trim(),
         customerAddress: customerAddress.trim(),
         items: invoiceItems,
-        paymentMode
+        paymentMode,
+        customInvoiceNumber: manualNumber
       });
 
       // Launch Confetti
@@ -232,7 +261,7 @@ export default function NewInvoiceView({
       // Fetch or construct created invoice for instant print preview
       const createdInv = (result && result.invoice) ? result.invoice : {
         id: result?.invoiceId || `INV-${Date.now()}`,
-        invoiceNumber: result?.invoiceNumber || nextInvoiceNum,
+        invoiceNumber: result?.invoiceNumber || (manualNumber || nextInvoiceNum),
         customerName: customerName.trim() || 'Cash Customer',
         customerMobile: customerMobile.trim(),
         customerAddress: customerAddress.trim(),
@@ -260,6 +289,9 @@ export default function NewInvoiceView({
       setCustomerMobile('');
       setCustomerAddress('');
       setInvoiceItems([]);
+      if (isManualInvoiceNum) {
+        setCustomInvoiceNum('');
+      }
       loadInvoiceData();
     } catch (err) {
       console.error('Invoice creation failed:', err);
@@ -269,33 +301,104 @@ export default function NewInvoiceView({
     }
   };
 
+  const activeInvoiceDisplay = isManualInvoiceNum
+    ? (customInvoiceNum.trim() || 'Manual: TYPE-NUMBER')
+    : nextInvoiceNum;
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
       {/* Page Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
         <div>
-          <h1 style={{ fontSize: '1.75rem', fontWeight: 800 }}>Create New Customer Invoice</h1>
+          <h1 style={{ fontSize: '1.75rem', fontWeight: 800 }}>Create Customer Invoice</h1>
           <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>
-            Fast retail billing studio • Direct garment options • Live interactive receipt
+            Fast retail billing studio • Auto & Manual invoice numbering • Reset controls
           </p>
         </div>
 
-        <div
-          style={{
-            background: 'var(--gold-gradient)',
-            color: '#1A1715',
-            padding: '0.5rem 1.25rem',
-            borderRadius: 'var(--radius-md)',
-            fontWeight: 800,
-            fontSize: '1.1rem',
-            boxShadow: 'var(--shadow-sm)',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '0.5rem'
-          }}
-        >
-          <Receipt size={20} />
-          <span>{nextInvoiceNum}</span>
+        {/* Invoice Number & Action Toolbar */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem', flexWrap: 'wrap' }}>
+          {/* Reset Bill Form Button */}
+          <button
+            type="button"
+            onClick={handleResetBillForm}
+            className="btn btn-secondary btn-sm"
+            title="Clear all fields and reset bill"
+            style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}
+          >
+            <RotateCcw size={14} />
+            <span>Reset Bill</span>
+          </button>
+
+          {/* Auto vs Manual Mode Switch */}
+          <div
+            style={{
+              display: 'flex',
+              background: 'var(--bg-secondary)',
+              padding: '0.2rem',
+              borderRadius: 'var(--radius-md)',
+              border: '1px solid var(--border-medium)'
+            }}
+          >
+            <button
+              type="button"
+              onClick={() => setIsManualInvoiceNum(false)}
+              className={`btn btn-sm ${!isManualInvoiceNum ? 'btn-primary' : 'btn-secondary'}`}
+              style={{ padding: '0.25rem 0.6rem', border: 'none', fontSize: '0.78rem' }}
+            >
+              Auto #
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setIsManualInvoiceNum(true);
+                if (!customInvoiceNum) setCustomInvoiceNum(nextInvoiceNum);
+              }}
+              className={`btn btn-sm ${isManualInvoiceNum ? 'btn-primary' : 'btn-secondary'}`}
+              style={{ padding: '0.25rem 0.6rem', border: 'none', fontSize: '0.78rem' }}
+            >
+              Manual #
+            </button>
+          </div>
+
+          {/* Invoice Number Badge / Input */}
+          {!isManualInvoiceNum ? (
+            <div
+              style={{
+                background: 'var(--gold-gradient)',
+                color: '#1A1715',
+                padding: '0.45rem 1rem',
+                borderRadius: 'var(--radius-md)',
+                fontWeight: 800,
+                fontSize: '1rem',
+                boxShadow: 'var(--shadow-sm)',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.4rem'
+              }}
+            >
+              <Receipt size={18} />
+              <span>{nextInvoiceNum}</span>
+            </div>
+          ) : (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+              <input
+                type="text"
+                value={customInvoiceNum}
+                onChange={(e) => setCustomInvoiceNum(e.target.value)}
+                placeholder="e.g. INV-001 or BILL-50"
+                className="form-input"
+                style={{
+                  width: '160px',
+                  fontWeight: 800,
+                  fontSize: '0.95rem',
+                  padding: '0.4rem 0.65rem',
+                  borderColor: 'var(--gold-500)',
+                  color: 'var(--gold-700)'
+                }}
+              />
+            </div>
+          )}
         </div>
       </div>
 
@@ -316,14 +419,14 @@ export default function NewInvoiceView({
         >
           {/* 1. Customer Name */}
           <div className="form-group" style={{ margin: 0 }}>
-            <label className="form-label" style={{ fontSize: '0.78rem' }}>Customer Name (Optional)</label>
+            <label className="form-label" style={{ fontSize: '0.78rem' }}>Customer Name</label>
             <div style={{ position: 'relative' }}>
               <User size={15} style={{ position: 'absolute', left: '0.75rem', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
               <input
                 type="text"
                 value={customerName}
                 onChange={(e) => setCustomerName(e.target.value)}
-                placeholder="e.g. Smt. Rekha Devi (or Cash)"
+                placeholder="Customer Name"
                 className="form-input"
                 style={{ paddingLeft: '2.1rem' }}
               />
@@ -349,14 +452,14 @@ export default function NewInvoiceView({
 
           {/* 3. Customer Address (Before Payment Mode) */}
           <div className="form-group" style={{ margin: 0 }}>
-            <label className="form-label" style={{ fontSize: '0.78rem' }}>Customer Address (Optional)</label>
+            <label className="form-label" style={{ fontSize: '0.78rem' }}>Customer Address</label>
             <div style={{ position: 'relative' }}>
               <MapPin size={15} style={{ position: 'absolute', left: '0.75rem', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
               <input
                 type="text"
                 value={customerAddress}
                 onChange={(e) => setCustomerAddress(e.target.value)}
-                placeholder="e.g. Rahulnagar, Sultanpur"
+                placeholder="Customer Address"
                 className="form-input"
                 style={{ paddingLeft: '2.1rem' }}
               />
@@ -420,7 +523,7 @@ export default function NewInvoiceView({
             {/* Product Name / Search Bar with Autocomplete (Independent) */}
             <div className="form-group" style={{ margin: 0, position: 'relative' }}>
               <label className="form-label" style={{ fontSize: '0.825rem', fontWeight: 600 }}>
-                Specific Item Name / Master Search (Optional)
+                Product Name
               </label>
               <div style={{ position: 'relative' }}>
                 <Search size={18} style={{ position: 'absolute', left: '0.85rem', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
@@ -434,7 +537,7 @@ export default function NewInvoiceView({
                   onFocus={() => {
                     if (availableProducts.length > 0) setIsSearchOpen(true);
                   }}
-                  placeholder="e.g. KAYAAN, BANARASI, COTTON PRINT (or leave empty)..."
+                  placeholder="Product Name"
                   className="form-input"
                   style={{ paddingLeft: '2.4rem', paddingRight: '2rem', fontWeight: 600, fontSize: '0.95rem' }}
                 />
@@ -481,18 +584,18 @@ export default function NewInvoiceView({
                       onClick={() => handleSelectProduct(prod)}
                       style={{
                         padding: '0.65rem 0.85rem',
-                        borderBottom: '1px solid var(--border-light)',
                         display: 'flex',
                         justifyContent: 'space-between',
                         alignItems: 'center',
                         cursor: 'pointer',
-                        transition: 'background 0.15s'
+                        borderBottom: '1px solid var(--border-light)',
+                        transition: 'background 0.15s ease'
                       }}
-                      onMouseEnter={(e) => e.currentTarget.style.background = '#FBF9F5'}
+                      onMouseEnter={(e) => e.currentTarget.style.background = '#FAF8F5'}
                       onMouseLeave={(e) => e.currentTarget.style.background = '#FFFFFF'}
                     >
                       <div>
-                        <div style={{ fontWeight: 700, fontSize: '0.875rem', color: 'var(--text-primary)' }}>
+                        <div style={{ fontWeight: 700, color: 'var(--text-primary)', fontSize: '0.875rem' }}>
                           {prod.productName}
                         </div>
                         <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
@@ -540,7 +643,7 @@ export default function NewInvoiceView({
                   step="0.01"
                   min="1"
                   required
-                  placeholder="e.g. 550"
+                  placeholder="Price / Rate"
                   value={productForm.rate}
                   onChange={(e) => setProductForm({ ...productForm, rate: e.target.value })}
                   className="form-input"
