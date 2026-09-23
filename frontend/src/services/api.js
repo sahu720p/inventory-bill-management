@@ -1,6 +1,6 @@
 // Centralized API Client for MongoDB POS Backend
 
-const API_BASE = '/api';
+const API_BASE = 'https://inventory-bill-management.onrender.com/api';
 
 async function request(endpoint, options = {}) {
   const url = `${API_BASE}${endpoint}`;
